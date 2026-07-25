@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Обнаружение объектов + Регистрация + Фото/Камера (авто 4с)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js">
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js">
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
+            font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; padding: 20px;
+        }
+        .auth-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(12px);
+            display: flex; justify-content: center; align-items: center; z-index: 100; padding: 20px;
+        }
+        .auth-overlay.hidden { display: none; }
+        .auth-panel {
+            background: rgba(20,22,40,0.9); backdrop-filter: blur(25px); border-radius: 2.5rem;
+            border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 30px 60px rgba(0,0,0,0.7);
+            padding: 2.5rem 2rem; max-width: 440px; width: 100%; color: #eaeaf2;
+        }
+        .auth-panel h2 { font-weight: 500; font-size: 2rem; text-align: center; margin-bottom: 0.5rem; }
+        .auth-subtitle { text-align: center; color: #9ca3af; margin-bottom: 2rem; font-size: 0.95rem; }
+        .tab-switch { display: flex; gap: 0.5rem; margin-bottom: 2rem; background: rgba(255,255,255,0.05); border-radius: 3rem; padding: 0.3rem; }
+        .tab-btn {
+            flex: 1; background: transparent; border: none; color: #b0b3cc; padding: 0.8rem 1rem;
+            border-radius: 2.5rem; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.25s;
+        }
+        .tab-btn.active { background: #2563eb; color: white; box-shadow: 0 6px 18px rgba(37,99,235,0.5); }
+        .input-group { margin-bottom: 1.2rem; }
+        .input-group label { display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem; font-weight: 500; }
+        .input-group input {
+            width: 100%; padding: 0.9rem 1.2rem; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 2rem; color: #f1f5f9; font-size: 1rem; outline: none; transition: 0.2s;
+        }
+        .input-group input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.25); background: rgba(255,255,255,0.1); }
+        .auth-btn {
+            width: 100%; margin-top: 0.8rem; padding: 0.95rem; border-radius: 2.8rem; font-weight: 600;
+            font-size: 1.1rem; background: #2563eb; border: none; color: white; cursor: pointer; transition: all 0.25s;
+            box-shadow: 0 8px 20px rgba(37,99,235,0.4);
+        }
+        .auth-btn:hover { background: #1d4ed8; transform: translateY(-2px); }
+        .auth-error { color: #f87171; font-size: 0.85rem; margin-top: 0.6rem; text-align: center; min-height: 1.2rem; }
+        .hidden-field { display: none; }
+        .app-container { display: none; }
+        .app-container.visible { display: flex; flex-direction: column; align-items: center; width: 100%; }
+        .glass-panel {
+            background: rgba(255,255,255,0.08); backdrop-filter: blur(20px); border-radius: 2.5rem;
+            border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 30px 50px rgba(0,0,0,0.6);
+            padding: 2rem; max-width: 720px; width: 100%; display: flex; flex-direction: column; align-items: center;
+        }
+        .header-row {
+            display: flex; justify-content: space-between; align-items: center; width: 100%;
+            margin-bottom: 1.2rem; flex-wrap: wrap; gap: 0.8rem;
+        }
+        h2 { font-weight: 500; font-size: 1.9rem; color: #eaeaf2; display: flex; align-items: center; gap: 0.5rem; margin: 0; }
+        h2 span { background: #3b82f6; padding: 0.2rem 0.8rem; border-radius: 2rem; font-size: 1rem; font-weight: 600; color: white; }
+        .user-badge {
+            display: flex; align-items: center; gap: 0.6rem; background: rgba(255,255,255,0.07);
+            padding: 0.5rem 1.2rem; border-radius: 2.5rem; color: #e2e8f0; font-weight: 500;
+            backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15);
+        }
+        .logout-btn {
+            background: rgba(239,68,68,0.25); border: 1px solid rgba(239,68,68,0.5); color: #fecaca;
+            border-radius: 2rem; padding: 0.4rem 1.1rem; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: 0.2s;
+        }
+        .logout-btn:hover { background: rgba(239,68,68,0.45); }
+        .mode-selector {
+            display: flex; gap: 0.6rem; margin-bottom: 1.4rem; width: 100%; justify-content: center;
+            background: rgba(0,0,0,0.2); border-radius: 3rem; padding: 0.3rem;
+        }
+        .mode-btn {
+            flex: 1; background: transparent; border: none; color: #cbd5e1; padding: 0.75rem 1.2rem;
+            border-radius: 2.5rem; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+        }
+        .mode-btn.active { background: #2563eb; color: white; box-shadow: 0 6px 18px rgba(37,99,235,0.4); }
+        .media-container {
+            position: relative; width: 100%; background: #0b0b14; border-radius: 1.8rem; overflow: hidden;
+            margin-bottom: 1.5rem; box-shadow: 0 20px 35px rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.1);
+            min-height: 200px; display: flex; align-items: center; justify-content: center;
+        }
+        video, canvas { display: block; width: 100%; height: auto; background: #000; object-fit: cover; aspect-ratio: 4/3; }
+        canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+        .photo-preview-wrapper { position: relative; display: none; width: 100%; height: 100%; }
+        #photoPreview { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+        .clear-photo-btn {
+            position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.4);
+            color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center;
+            justify-content: center; cursor: pointer; font-size: 1.2rem; backdrop-filter: blur(6px); transition: 0.2s; z-index: 5;
+        }
+        .clear-photo-btn:hover { background: rgba(220,38,38,0.7); border-color: #f87171; }
+        .photo-upload-area {
+            display: none; flex-direction: column; align-items: center; justify-content: center; gap: 0.8rem;
+            color: #b9bbd6; font-size: 1rem; cursor: pointer; padding: 2rem; border: 2px dashed rgba(255,255,255,0.3);
+            border-radius: 1.5rem; transition: 0.2s; width: 100%; height: 100%;
+        }
+        .photo-upload-area:hover { border-color: #3b82f6; background: rgba(59,130,246,0.05); }
+        .status-row {
+            display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 1.2rem;
+            color: #b9bbd6; background: rgba(0,0,0,0.35); border-radius: 3rem; padding: 0.6rem 1.5rem; backdrop-filter: blur(10px);
+        }
+        .description-box {
+            background: rgba(10,10,25,0.7); backdrop-filter: blur(15px); border-radius: 1.8rem; padding: 1.2rem 1.8rem;
+            margin: 0.5rem 0 1.3rem; width: 100%; border: 1px solid rgba(255,255,255,0.18); color: #f0f0ff;
+            font-size: 1.2rem; line-height: 1.5; min-height: 4.5rem; word-break: break-word; box-shadow: 0 8px 18px rgba(0,0,0,0.4);
+        }
+        .button-group { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; width: 100%; }
+        .btn {
+            border: none; background: rgba(30,40,70,0.5); backdrop-filter: blur(15px); border-radius: 2.8rem;
+            padding: 0.9rem 2.2rem; font-weight: 550; font-size: 1.1rem; color: #f0f2ff; cursor: pointer;
+            display: flex; align-items: center; gap: 0.5rem; border: 1px solid rgba(255,255,255,0.2);
+            transition: all 0.25s; box-shadow: 0 5px 12px rgba(0,0,0,0.3);
+        }
+        .btn:hover { background: rgba(59,130,246,0.25); border-color: rgba(255,255,255,0.4); transform: translateY(-2px); }
+        .btn.primary { background: #2563eb; border-color: #3b82f6; color: white; }
+        .btn.danger { background: rgba(220,38,38,0.2); border-color: rgba(239,68,68,0.5); }
+        .btn.auto { background: rgba(16,185,129,0.25); border-color: rgba(52,211,153,0.6); color: #d1fae5; }
+        .btn.stop-speech { background: rgba(245,158,11,0.25); border-color: rgba(251,191,36,0.7); color: #fde68a; font-size: 0.95rem; padding: 0.6rem 1.5rem; }
+        .warning-box {
+            background: rgba(255,193,7,0.15); border: 1px solid #ffc107; border-radius: 1rem;
+            padding: 0.8rem 1.2rem; color: #ffd966; margin-bottom: 1rem; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-overlay" id="authOverlay">
+        <div class="auth-panel">
+            <h2>Добро пожаловать</h2>
+            <p class="auth-subtitle">Войдите или создайте аккаунт</p>
+            <div class="tab-switch">
+                <button class="tab-btn active" id="tabLogin">Вход</button>
+                <button class="tab-btn" id="tabRegister">Регистрация</button>
+            </div>
+            <div id="loginFields">
+                <div class="input-group"><label>Имя пользователя или email</label><input type="text" id="loginUsername" placeholder="Введите логин" autocomplete="username"></div>
+                <div class="input-group"><label>Пароль</label><input type="password" id="loginPassword" placeholder="········" autocomplete="current-password"></div>
+                <button class="auth-btn" id="loginBtn">Войти</button>
+                <div class="auth-error" id="loginError"></div>
+            </div>
+            <div id="registerFields" class="hidden-field">
+                <div class="input-group"><label>Имя пользователя</label><input type="text" id="regUsername" placeholder="Придумайте логин" autocomplete="username"></div>
+                <div class="input-group"><label>Email</label><input type="email" id="regEmail" placeholder="example@mail.com" autocomplete="email"></div>
+                <div class="input-group"><label>Пароль</label><input type="password" id="regPassword" placeholder="Минимум 4 символа" autocomplete="new-password"></div>
+                <div class="input-group"><label>Подтвердите пароль</label><input type="password" id="regPasswordConfirm" placeholder="Повторите пароль"></div>
+                <button class="auth-btn" id="registerBtn">Зарегистрироваться</button>
+                <div class="auth-error" id="regError"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container" id="appContainer">
+        <div class="glass-panel">
+            <div class="header-row">
+                <h2>Обзор пути <span>Web</span></h2>
+                <div class="user-badge" id="userBadge">
+                    <span id="displayUsername">Гость</span>
+                    <button class="logout-btn" id="logoutBtn">Выйти</button>
+                </div>
+            </div>
+            <div class="mode-selector">
+                <button class="mode-btn active" id="modeWebcam">Веб-камера</button>
+                <button class="mode-btn" id="modePhoto">Фото</button>
+            </div>
+            <div class="media-container" id="mediaContainer">
+                <video id="video" autoplay playsinline muted style="display: none;"></video>
+                <canvas id="canvas"></canvas>
+                <div class="photo-preview-wrapper" id="photoPreviewWrapper">
+                    <img id="photoPreview" alt="Загруженное фото" style="display: none;" />
+                    <span class="clear-photo-btn" id="clearPhotoBtn" title="Убрать фото">✕</span>
+                </div>
+                <div class="photo-upload-area" id="photoUploadArea" style="display: none;">
+                    <span style="font-size: 2rem;">+</span>
+                    <span>Нажмите, чтобы выбрать фото</span>
+                    <input type="file" id="photoInput" accept="image/*" style="display: none;" />
+                </div>
+            </div>
+            <div class="status-row">
+                <span id="modelStatus">Модель...</span>
+                <span id="cameraStatus">Камера</span>
+            </div>
+            <div id="descriptionDisplay" class="description-box">
+                Нажмите Пробел или кнопку для анализа.
+            </div>
+            <div id="securityWarning" class="warning-box" style="display: none;">
+                Камера требует безопасного соединения (localhost или HTTPS). Откройте эту страницу через локальный сервер.
+            </div>
+            <div class="button-group">
+                <button id="startCameraBtn" class="btn">Запустить камеру</button>
+                <button id="analyzeBtn" class="btn primary">Анализ и озвучка (Пробел)</button>
+                <button id="autoAnalyzeBtn" class="btn auto">Авто (4 с)</button>
+                <button id="stopSpeechBtn" class="btn stop-speech">Остановить озвучку</button>
+                <button id="stopBtn" class="btn danger">Сброс (Камера/Фото)</button>
+            </div>
+            <div style="margin-top:0.8rem; font-size:0.8rem; color:#7f8aa0;">
+                Объекты, мешающие проходу, подсвечиваются
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const USERS_KEY = 'app_users_db';
+            function getUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch (e) { return {}; } }
+            function saveUsers(users) { localStorage.setItem(USERS_KEY, JSON.stringify(users)); }
+
+            const authOverlay = document.getElementById('authOverlay');
+            const appContainer = document.getElementById('appContainer');
+            const tabLogin = document.getElementById('tabLogin');
+            const tabRegister = document.getElementById('tabRegister');
+            const loginFields = document.getElementById('loginFields');
+            const registerFields = document.getElementById('registerFields');
+            const loginError = document.getElementById('loginError');
+            const regError = document.getElementById('regError');
+            const displayUsername = document.getElementById('displayUsername');
+            const logoutBtn = document.getElementById('logoutBtn');
+            const loginUsername = document.getElementById('loginUsername');
+            const loginPassword = document.getElementById('loginPassword');
+            const loginBtn = document.getElementById('loginBtn');
+            const regUsername = document.getElementById('regUsername');
+            const regEmail = document.getElementById('regEmail');
+            const regPassword = document.getElementById('regPassword');
+            const regPasswordConfirm = document.getElementById('regPasswordConfirm');
+            const registerBtn = document.getElementById('registerBtn');
+            let currentUser = null;
+
+            tabLogin.addEventListener('click', () => {
+                tabLogin.classList.add('active'); tabRegister.classList.remove('active');
+                loginFields.classList.remove('hidden-field'); registerFields.classList.add('hidden-field');
+                loginError.textContent = ''; regError.textContent = '';
+            });
+            tabRegister.addEventListener('click', () => {
+                tabRegister.classList.add('active'); tabLogin.classList.remove('active');
+                registerFields.classList.remove('hidden-field'); loginFields.classList.add('hidden-field');
+                loginError.textContent = ''; regError.textContent = '';
+            });
+
+            loginBtn.addEventListener('click', () => {
+                loginError.textContent = '';
+                const u = loginUsername.value.trim(), p = loginPassword.value.trim();
+                if(!u||!p){loginError.textContent='Заполните все поля.';return;}
+                const users = getUsers();
+                const found = Object.entries(users).find(([k,v])=> (k===u||v.email===u) && v.password===p);
+                if(!found){loginError.textContent='Неверный логин/email или пароль.';return;}
+                currentUser = found[1]; currentUser.username = found[0];
+                loginUsername.value=''; loginPassword.value='';
+                openApp();
+            });
+
+            registerBtn.addEventListener('click', () => {
+                regError.textContent='';
+                const un=regUsername.value.trim(), em=regEmail.value.trim(), pw=regPassword.value, pw2=regPasswordConfirm.value;
+                if(!un||!em||!pw||!pw2){regError.textContent='Все поля обязательны.';return;}
+                if(un.length<3){regError.textContent='Имя минимум 3 символа.';return;}
+                if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){regError.textContent='Некорректный email.';return;}
+                if(pw.length<4){regError.textContent='Пароль минимум 4 символа.';return;}
+                if(pw!==pw2){regError.textContent='Пароли не совпадают.';return;}
+                const users=getUsers();
+                if(users[un]){regError.textContent='Пользователь уже существует.';return;}
+                if(Object.values(users).some(u=>u.email===em)){regError.textContent='Email занят.';return;}
+                users[un]={email:em, password:pw}; saveUsers(users);
+                currentUser={username:un, email:em, password:pw};
+                regUsername.value=''; regEmail.value=''; regPassword.value=''; regPasswordConfirm.value='';
+                openApp();
+            });
+
+            logoutBtn.addEventListener('click', ()=>{
+                currentUser=null;
+                appContainer.classList.remove('visible');
+                authOverlay.classList.remove('hidden');
+                stopCamera(); stopSpeech(); stopAutoAnalysis();
+                tabLogin.click();
+            });
+
+            function openApp(){
+                authOverlay.classList.add('hidden');
+                appContainer.classList.add('visible');
+                displayUsername.textContent = currentUser ? currentUser.username : 'Гость';
+                document.getElementById('modeWebcam').click();
+                startCamera().catch(()=>{});
+            }
+
+            document.addEventListener('keydown', (e)=>{
+                if(e.key==='Enter' && !authOverlay.classList.contains('hidden')){
+                    if(!registerFields.classList.contains('hidden-field')) registerBtn.click();
+                    else loginBtn.click();
+                }
+            });
+
+            const modeWebcamBtn = document.getElementById('modeWebcam');
+            const modePhotoBtn = document.getElementById('modePhoto');
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            const photoPreview = document.getElementById('photoPreview');
+            const photoPreviewWrapper = document.getElementById('photoPreviewWrapper');
+            const photoUploadArea = document.getElementById('photoUploadArea');
+            const photoInput = document.getElementById('photoInput');
+            const clearPhotoBtn = document.getElementById('clearPhotoBtn');
+            const startCameraBtn = document.getElementById('startCameraBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const stopSpeechBtn = document.getElementById('stopSpeechBtn');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const autoAnalyzeBtn = document.getElementById('autoAnalyzeBtn');
+            const cameraStatusSpan = document.getElementById('cameraStatus');
+            const descriptionDiv = document.getElementById('descriptionDisplay');
+            const modelStatusSpan = document.getElementById('modelStatus');
+            const securityWarning = document.getElementById('securityWarning');
+
+            let currentMode = 'webcam';
+            let isCameraActive = false;
+            let mediaStream = null;
+            let cocoModel = null;
+            let uploadedImage = null;
+            let autoInterval = null;
+            let isAutoActive = false;
+
+            if (window.location.protocol === 'file:' || (window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')) {
+                securityWarning.style.display = 'block';
+            }
+
+            function setMode(mode) {
+                currentMode = mode;
+                stopAutoAnalysis();
+                if (mode === 'webcam') {
+                    modeWebcamBtn.classList.add('active'); modePhotoBtn.classList.remove('active');
+                    video.style.display = 'block';
+                    photoPreviewWrapper.style.display = 'none';
+                    photoUploadArea.style.display = 'none';
+                    canvas.style.display = 'block';
+                    startCameraBtn.style.display = 'inline-flex';
+                    stopBtn.style.display = 'inline-flex';
+                    autoAnalyzeBtn.style.display = 'inline-flex';
+                    stopBtn.textContent = 'Стоп камера';
+                    cameraStatusSpan.textContent = 'Камера ожидает';
+                    descriptionDiv.innerHTML = 'Нажмите Пробел или включите авто (4 с).';
+                    if (!isCameraActive) startCamera().catch(()=>{});
+                } else {
+                    modePhotoBtn.classList.add('active'); modeWebcamBtn.classList.remove('active');
+                    if (isCameraActive) stopCamera();
+                    video.style.display = 'none';
+                    canvas.style.display = 'block';
+                    photoPreviewWrapper.style.display = uploadedImage ? 'block' : 'none';
+                    photoUploadArea.style.display = uploadedImage ? 'none' : 'flex';
+                    startCameraBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-flex';
+                    autoAnalyzeBtn.style.display = 'none';
+                    stopBtn.textContent = 'Очистить фото';
+                    cameraStatusSpan.textContent = 'Режим фото';
+                    descriptionDiv.innerHTML = uploadedImage ? 'Фото загружено. Нажмите Пробел для анализа.' : 'Выберите изображение для анализа.';
+                }
+            }
+
+            modeWebcamBtn.addEventListener('click', ()=> setMode('webcam'));
+            modePhotoBtn.addEventListener('click', ()=> setMode('photo'));
+
+            photoUploadArea.addEventListener('click', ()=> photoInput.click());
+            photoInput.addEventListener('change', (e)=>{
+                const file = e.target.files[0];
+                if(!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev)=>{
+                    const img = new Image();
+                    img.onload = ()=>{
+                        uploadedImage = img;
+                        photoPreview.src = ev.target.result;
+                        photoPreview.style.display = 'block';
+                        photoPreviewWrapper.style.display = 'block';
+                        photoUploadArea.style.display = 'none';
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        ctx.clearRect(0,0,canvas.width,canvas.height);
+                        ctx.drawImage(img,0,0);
+                        descriptionDiv.innerHTML = 'Фото загружено. Нажмите Пробел для анализа.';
+                        if(currentMode==='photo') stopBtn.textContent = 'Очистить фото';
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+
+            clearPhotoBtn.addEventListener('click', ()=>{
+                uploadedImage = null;
+                photoPreview.style.display = 'none';
+                photoPreviewWrapper.style.display = 'none';
+                photoUploadArea.style.display = 'flex';
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                descriptionDiv.innerHTML = 'Выберите изображение для анализа.';
+            });
+
+            stopBtn.addEventListener('click', ()=>{
+                if(currentMode==='webcam'){
+                    stopCamera();
+                    stopSpeech();
+                    stopAutoAnalysis();
+                } else {
+                    clearPhotoBtn.click();
+                    stopSpeech();
+                }
+            });
+
+            stopSpeechBtn.addEventListener('click', stopSpeech);
+
+            function startAutoAnalysis() {
+                if (!cocoModel || currentMode !== 'webcam' || !isCameraActive) {
+                    alert('Сначала запустите камеру и дождитесь загрузки модели.');
+                    return;
+                }
+                if (autoInterval) return;
+                isAutoActive = true;
+                autoAnalyzeBtn.textContent = 'Стоп авто';
+                autoAnalyzeBtn.classList.add('danger');
+                descriptionDiv.innerHTML = 'Автоанализ каждые 4 секунды...';
+                analyzeAndSpeak();
+                autoInterval = setInterval(() => {
+                    if (currentMode === 'webcam' && isCameraActive && cocoModel) {
+                        analyzeAndSpeak();
+                    } else {
+                        stopAutoAnalysis();
+                    }
+                }, 4000); // Интервал 4 секунды
+            }
+
+            function stopAutoAnalysis() {
+                if (autoInterval) {
+                    clearInterval(autoInterval);
+                    autoInterval = null;
+                }
+                isAutoActive = false;
+                autoAnalyzeBtn.textContent = 'Авто (4 с)';
+                autoAnalyzeBtn.classList.remove('danger');
+                if (currentMode === 'webcam' && isCameraActive) {
+                    descriptionDiv.innerHTML = 'Автоанализ остановлен. Нажмите Пробел для ручного анализа.';
+                }
+            }
+
+            autoAnalyzeBtn.addEventListener('click', ()=>{
+                if (isAutoActive) stopAutoAnalysis();
+                else startAutoAnalysis();
+            });
+
+            const cocoToRussian = {
+                'person':'человек','bicycle':'велосипед','car':'машина','motorcycle':'мотоцикл','airplane':'самолёт','bus':'автобус',
+                'train':'поезд','truck':'грузовик','boat':'лодка','traffic light':'светофор','fire hydrant':'пожарный гидрант',
+                'stop sign':'знак стоп','parking meter':'паркомат','bench':'скамейка','bird':'птица','cat':'кошка','dog':'собака',
+                'horse':'лошадь','sheep':'овца','cow':'корова','elephant':'слон','bear':'медведь','zebra':'зебра','giraffe':'жираф',
+                'backpack':'рюкзак','umbrella':'зонт','handbag':'сумка','tie':'галстук','suitcase':'чемодан','frisbee':'летающая тарелка',
+                'skis':'лыжи','snowboard':'сноуборд','sports ball':'мяч','kite':'воздушный змей','baseball bat':'бейсбольная бита',
+                'baseball glove':'перчатка','skateboard':'скейтборд','surfboard':'доска для сёрфинга','tennis racket':'теннисная ракетка',
+                'bottle':'бутылка','wine glass':'бокал','cup':'чашка','fork':'вилка','knife':'нож','spoon':'ложка','bowl':'миска',
+                'banana':'банан','apple':'яблоко','sandwich':'сэндвич','orange':'апельсин','broccoli':'брокколи','carrot':'морковь',
+                'hot dog':'хот-дог','pizza':'пицца','donut':'пончик','cake':'торт','chair':'стул','couch':'диван','potted plant':'растение',
+                'bed':'кровать','dining table':'обеденный стол','toilet':'унитаз','tv':'телевизор','laptop':'ноутбук','mouse':'мышь',
+                'remote':'пульт','keyboard':'клавиатура','cell phone':'телефон','microwave':'микроволновка','oven':'духовка','toaster':'тостер',
+                'sink':'раковина','refrigerator':'холодильник','book':'книга','clock':'часы','vase':'ваза','scissors':'ножницы',
+                'teddy bear':'плюшевый мишка','hair drier':'фен','toothbrush':'зубная щётка'
+            };
+            const EXCLUDE_CLASSES = new Set(['bird','airplane','kite']);
+
+            function getDistanceCategory(relHeight) {
+                if(relHeight>=0.4) return "очень близко";
+                if(relHeight>=0.2) return "близко";
+                if(relHeight>=0.1) return "на среднем расстоянии";
+                if(relHeight>=0.05) return "далеко";
+                return "очень далеко";
+            }
+
+            function speakRussian(text) {
+                return new Promise(resolve => {
+                    if(!window.speechSynthesis){resolve();return;}
+                    window.speechSynthesis.cancel();
+                    const u = new SpeechSynthesisUtterance(text);
+                    u.lang='ru-RU';
+                    const voices = window.speechSynthesis.getVoices();
+                    const ru = voices.find(v=>v.lang.startsWith('ru'));
+                    if(ru) u.voice=ru;
+                    u.rate = 2.5;
+                    u.onend=resolve; u.onerror=resolve;
+                    window.speechSynthesis.speak(u);
+                });
+            }
+
+            function stopSpeech(){ if(window.speechSynthesis) window.speechSynthesis.cancel(); }
+
+            function stopCamera(){
+                if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
+                video.srcObject=null; isCameraActive=false;
+                cameraStatusSpan.textContent='Камера остановлена';
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+            }
+
+            async function startCamera(){
+                if(currentMode!=='webcam') return;
+                stopCamera();
+                try {
+                    let stream;
+                    const constraints = {
+                        video: {
+                            facingMode: 'environment',
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 },
+                            frameRate: { ideal: 60 }
+                        },
+                        audio: false
+                    };
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    } catch (envErr) {
+                        constraints.video.facingMode = 'user';
+                        stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    }
+                    mediaStream=stream; video.srcObject=stream;
+                    await video.play(); isCameraActive=true;
+                    cameraStatusSpan.textContent='Камера активна (HD, 60 fps)';
+                    video.addEventListener('loadedmetadata',()=>{
+                        canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+                    });
+                    if(video.videoWidth){ canvas.width=video.videoWidth; canvas.height=video.videoHeight; }
+                    securityWarning.style.display='none';
+                    descriptionDiv.innerHTML='Камера готова. Нажмите Пробел или включите авто (4 с).';
+                } catch(err){
+                    cameraStatusSpan.textContent='Ошибка камеры';
+                    descriptionDiv.innerHTML=`Ошибка: ${err.message}`;
+                    isCameraActive=false;
+                }
+            }
+
+            async function loadModel(){
+                modelStatusSpan.textContent='Загрузка модели (повышенная точность)...';
+                try {
+                    cocoModel = await cocoSsd.load({ base: 'mobilenet_v2' });
+                    modelStatusSpan.textContent='Модель готова (mobilenet v2)';
+                } catch(e){
+                    modelStatusSpan.textContent='Ошибка модели';
+                    descriptionDiv.innerHTML='Не удалось загрузить модель.';
+                }
+            }
+
+            async function analyzeAndSpeak(){
+                if(!cocoModel){ descriptionDiv.innerHTML='Модель не готова.'; return; }
+                let sourceImage;
+                if(currentMode==='webcam'){
+                    if(!isCameraActive){ descriptionDiv.innerHTML='Камера не активна.'; return; }
+                    sourceImage=video;
+                    if(canvas.width!==video.videoWidth||canvas.height!==video.videoHeight){
+                        canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+                    }
+                } else {
+                    if(!uploadedImage){ descriptionDiv.innerHTML='Сначала выберите фото.'; return; }
+                    sourceImage=uploadedImage;
+                    canvas.width=uploadedImage.width; canvas.height=uploadedImage.height;
+                }
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                ctx.drawImage(sourceImage,0,0,canvas.width,canvas.height);
+
+                let predictions;
+                try { predictions = await cocoModel.detect(sourceImage); }
+                catch(e){ descriptionDiv.innerHTML='Ошибка детекции.'; return; }
+
+                const imgHeight = currentMode==='webcam' ? video.videoHeight : uploadedImage.height;
+                const obstacles = [];
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                ctx.drawImage(sourceImage,0,0,canvas.width,canvas.height);
+
+                for(const pred of predictions){
+                    const cls = pred.class.toLowerCase();
+                    if(EXCLUDE_CLASSES.has(cls)) continue;
+                    const [x,y,w,h] = pred.bbox;
+                    const relH = h/imgHeight;
+                    const ymax = (y+h)/imgHeight;
+                    if(ymax>0.4 && relH>0.04){
+                        const name = cocoToRussian[cls]||cls;
+                        obstacles.push(`${name} (${getDistanceCategory(relH)})`);
+                        ctx.strokeStyle='#3b82f6'; ctx.lineWidth=Math.max(2,3*(canvas.width/640));
+                        ctx.shadowColor='#3b82f6'; ctx.shadowBlur=8;
+                        ctx.strokeRect(x,y,w,h);
+                        ctx.font=`bold ${Math.max(14,18*(canvas.width/640))}px "Segoe UI"`;
+                        ctx.fillStyle='#ffffff'; ctx.shadowColor='#000';
+                        ctx.fillText(name,x,y-6);
+                    }
+                }
+                ctx.shadowColor='transparent'; ctx.shadowBlur=0;
+
+                let desc;
+                if(obstacles.length===0) desc='Объектов, мешающих проходу, не обнаружено.';
+                else if(obstacles.length===1) desc=`На пути: ${obstacles[0]}.`;
+                else desc=`На пути: ${obstacles.slice(0,-1).join(', ')} и ${obstacles[obstacles.length-1]}.`;
+                descriptionDiv.textContent=desc;
+                stopSpeech();
+                await speakRussian(desc);
+            }
+
+            startCameraBtn.addEventListener('click', startCamera);
+            analyzeBtn.addEventListener('click', analyzeAndSpeak);
+
+            window.addEventListener('keydown',(e)=>{
+                if(!authOverlay.classList.contains('hidden')) return;
+                if(e.code==='Space'||e.key===' '){ e.preventDefault(); analyzeAndSpeak(); }
+                else if(e.code==='Escape'||e.key==='Escape'){
+                    e.preventDefault();
+                    if(currentMode==='webcam'){ stopCamera(); stopSpeech(); stopAutoAnalysis(); }
+                    else { clearPhotoBtn.click(); stopSpeech(); }
+                }
+            });
+
+            loadModel();
+            window.addEventListener('beforeunload',()=>{ stopCamera(); stopSpeech(); stopAutoAnalysis(); });
+            window.startCamera=startCamera; window.stopCamera=stopCamera; window.stopSpeech=stopSpeech;
+
+            authOverlay.classList.remove('hidden');
+            appContainer.classList.remove('visible');
+        })();
+    </script>
+</body>
+</html>
